@@ -1,0 +1,28 @@
+# FastAPI & Server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18
+
+# Google Cloud & Vertex AI
+google-adk==1.2.1
+google-cloud-aiplatform>=1.50.0
+google-cloud-bigquery>=3.20.0
+google-genai>=1.0.0
+
+# Database
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+alembic==1.14.1
+
+# Vector DB
+chromadb-client>=0.5.0
+
+# Document parsing
+python-docx==1.1.2
+PyPDF2==3.0.1
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.10.4
+pydantic-settings==2.7.1
+httpx==0.28.1

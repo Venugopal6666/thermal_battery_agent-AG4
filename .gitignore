@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker volumes
+pgdata/
+chromadata/
+
+# Build output
+frontend/dist/
+
+# Logs
+*.log
+
+# Service account keys (NEVER commit)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# Antigravity / Gemini
+.gemini/
+
+# Streamlit cache
+streamlit_app/__pycache__/
+
+# Misc
+*.bak
+*.tmp

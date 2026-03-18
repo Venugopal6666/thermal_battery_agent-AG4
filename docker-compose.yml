@@ -1,0 +1,36 @@
+# Docker Compose for infrastructure services only
+# Backend and frontend run locally for faster development
+services:
+  postgres:
+    image: postgres:16
+    container_name: resl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: resl_agent
+      POSTGRES_USER: resl_user
+      POSTGRES_PASSWORD: resl_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resl_user -d resl_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: resl-chromadb
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    volumes:
+      - chromadata:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
+volumes:
+  pgdata:
+  chromadata:
