@@ -4,6 +4,7 @@ from google.adk.agents import Agent
 
 from tools.bigquery_tools import (
     compare_builds,
+    compute_capacity_at_voltage,
     get_battery_list,
     get_builds_for_battery,
     get_customer_specs,
@@ -12,6 +13,7 @@ from tools.bigquery_tools import (
     get_discharge_summary,
     get_temperature_data,
     query_bigquery,
+    run_aggregation_query,
 )
 
 from tools.discharge_analysis_tools import (
@@ -85,6 +87,9 @@ Specific observations with EXACT values.
 ### Recommendations
 Actionable next steps.""",
     tools=[
+        # Generic computation (handles ANY rulebook calculation)
+        run_aggregation_query,
+        compute_capacity_at_voltage,
         # Specialized discharge analysis (PRIMARY)
         analyze_build_complete,
         compare_builds_performance,

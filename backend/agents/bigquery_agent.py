@@ -4,6 +4,7 @@ from google.adk.agents import Agent
 
 from tools.bigquery_tools import (
     compare_builds,
+    compute_capacity_at_voltage,
     get_battery_list,
     get_builds_for_battery,
     get_customer_specs,
@@ -12,6 +13,7 @@ from tools.bigquery_tools import (
     get_discharge_summary,
     get_temperature_data,
     query_bigquery,
+    run_aggregation_query,
 )
 
 from tools.discharge_analysis_tools import (
@@ -39,38 +41,47 @@ bigquery_agent = Agent(
 3. Tool responses are GROUND TRUTH. Copy numbers exactly as returned.
 4. If tool returns no data, say "No data found" — never invent values.
 
-## CRITICAL: DISCHARGE ANALYSIS TOOLS
-For ANY question about discharge data, duration, activation time, voltage analysis:
-- Use analyze_build_complete() for comprehensive analysis of a single build
-- Use calculate_discharge_duration() for discharge duration specifically
-- Use calculate_activation_time() for activation time specifically
-- Use calculate_open_circuit_voltage() for OCV analysis
-- Use calculate_on_load_voltage() for on-load voltage
-- Use compare_builds_performance() to compare multiple builds
+## GENERIC COMPUTATION (for ANY rulebook calculation):
+You have TWO powerful generic tools that can implement ANY calculation from the rulebook:
 
-These tools compute results from ALL 3.8M+ data points using BigQuery SQL.
-They implement the RESL rulebook procedures (Rules 2.4-2.8) server-side.
-The results are EXACT — no sampling, no estimation, no approximation.
+1. **run_aggregation_query(sql_query)** — Execute ANY aggregation SQL with no row limit.
+   Write custom BigQuery SQL to compute whatever the rule requires.
+   Use CTEs (WITH clauses) for multi-step calculations.
+   Tables: discharge_data, design_parameters, customer_specs, temperature_data
+   Project: thermal-battery-agent-ds1, Dataset: thermal_battery_data
 
-NEVER use get_discharge_data() for analysis — it only returns sampled points.
-Use get_discharge_data() ONLY when user wants to see raw time-series for charts.
+2. **compute_capacity_at_voltage(battery_code, build_number, cutoff_voltage)** —
+   Compute Ampere-seconds capacity at ANY cut-off voltage (Rule 4.6.4).
+
+IMPORTANT: When a rule describes a calculation procedure, translate it into SQL
+and use run_aggregation_query(). You do NOT need a pre-built tool for every rule.
+
+## SPECIALIZED TOOLS (for common analyses):
+- analyze_build_complete() — Discharge duration, activation time, OCV, on-load voltage
+- calculate_discharge_duration() — Rule 2.4
+- calculate_activation_time() — Rule 2.5
+- calculate_open_circuit_voltage() — Rule 2.6
+- calculate_on_load_voltage() — Rule 2.7
+- compare_builds_performance() — Multi-build comparison
 
 ## TOOL SELECTION GUIDE:
 - "Analyze battery X build Y" → analyze_build_complete()
-- "What is the discharge duration?" → calculate_discharge_duration()
-- "What is the activation time?" → calculate_activation_time()
-- "Compare builds A, B, C" → compare_builds_performance()
-- "Show me the discharge curve" → get_discharge_data() (for chart data only)
+- "Calculate capacity at voltage X" → compute_capacity_at_voltage()
+- "Active material utilization" → get_design_parameters() + compute_capacity_at_voltage()
+- Complex rule-based calculations → run_aggregation_query() with custom SQL
+- "Show me the discharge curve" → get_discharge_data() (chart data only)
 - "List batteries" → get_battery_list()
 - "Customer specs" → get_customer_specs()
 - "Design parameters" → get_design_parameters()
-- "Overview/summary" → get_discharge_summary()
 
 ## FORMAT:
 Present ALL numerical results in markdown tables with exact values and units.
 Include pass/fail status when available.""",
     tools=[
-        # === Specialized discharge analysis (preferred for analysis) ===
+        # === Generic computation (handles ANY rulebook calculation) ===
+        run_aggregation_query,
+        compute_capacity_at_voltage,
+        # === Specialized discharge analysis ===
         analyze_build_complete,
         calculate_discharge_duration,
         calculate_activation_time,

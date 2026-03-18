@@ -50,6 +50,14 @@ TOOL_DESCRIPTIONS = {
     "get_temperature_data": "🌡️ Fetching temperature data...",
     "compare_builds": "🔄 Comparing builds...",
     "get_discharge_summary": "📊 Fetching discharge summary...",
+    # Discharge analysis tools (server-side computation)
+    "calculate_discharge_duration": "⏱️ Computing discharge duration (server-side, all data points)...",
+    "calculate_activation_time": "⚡ Computing activation time (server-side)...",
+    "calculate_open_circuit_voltage": "🔌 Computing open circuit voltage (server-side)...",
+    "calculate_on_load_voltage": "📈 Computing on-load voltage (server-side)...",
+    "analyze_build_complete": "🔬 Running complete build analysis (all rulebook metrics, server-side)...",
+    "compare_builds_performance": "📊 Comparing builds performance (server-side)...",
+    # Calculation tools
     "analyze_discharge_curve": "📈 Analyzing discharge curve...",
     "analyze_temperature_profile": "🌡️ Analyzing temperature profile...",
     "calculate_specific_energy": "⚡ Calculating specific energy...",
@@ -57,6 +65,9 @@ TOOL_DESCRIPTIONS = {
     "calculate_c_rate": "📐 Calculating C-rate...",
     "calculate_thermal_efficiency": "🔥 Calculating thermal efficiency...",
     "calculate_internal_resistance": "Ω Calculating internal resistance...",
+    # Generic computation tools
+    "run_aggregation_query": "🧮 Running server-side aggregation (all data points)...",
+    "compute_capacity_at_voltage": "⚡ Computing Ampere-seconds capacity at cut-off voltage...",
     "search_rules": "📖 Searching rulebook...",
     "get_rules_by_category": "📂 Fetching rules by category...",
     "transfer_to_agent": "🤖 Delegating to sub-agent...",
@@ -218,14 +229,24 @@ def _get_tool_description(fn_name: str, args: dict = None) -> str:
     if args:
         if fn_name in ("get_customer_specs", "get_builds_for_battery") and "battery_code" in args:
             base = base.rstrip("...") + f" (Battery {args['battery_code']})..."
-        elif fn_name in ("get_design_parameters", "get_discharge_data", "get_temperature_data"):
+        elif fn_name in ("get_design_parameters", "get_discharge_data", "get_temperature_data",
+                         "calculate_discharge_duration", "calculate_activation_time",
+                         "calculate_open_circuit_voltage", "calculate_on_load_voltage",
+                         "analyze_build_complete"):
             parts = []
             if "battery_code" in args:
                 parts.append(f"Battery {args['battery_code']}")
             if "build_number" in args:
                 parts.append(f"Build {args['build_number']}")
+            if "discharge_temperature" in args and args["discharge_temperature"]:
+                parts.append(f"Temp {args['discharge_temperature']}")
             if parts:
                 base = base.rstrip("...") + f" ({', '.join(parts)})..."
+        elif fn_name == "compare_builds_performance":
+            bc = args.get("battery_code", "?")
+            builds = args.get("build_numbers", [])
+            if builds:
+                base = f"📊 Comparing {len(builds)} builds for Battery {bc} (server-side)..."
         elif fn_name == "query_bigquery" and "sql_query" in args:
             sql = args["sql_query"][:80].replace("\n", " ").strip()
             base = f"🔍 Running SQL: {sql}..."

@@ -34,6 +34,15 @@ MAX_ROWS_FOR_LLM = 100
 # ── Generic query ───────────────────────────────────────────
 
 
+def _is_aggregation_query(sql: str) -> bool:
+    """Detect if a SQL query uses aggregation (GROUP BY, SUM, AVG, etc.).
+    Aggregation queries naturally return few rows, so they don't need LIMIT."""
+    upper = sql.upper()
+    agg_keywords = ["GROUP BY", "SUM(", "AVG(", "COUNT(", "MIN(", "MAX(",
+                    "HAVING", "ARRAY_AGG(", "STRING_AGG("]
+    return any(kw in upper for kw in agg_keywords)
+
+
 def query_bigquery(sql_query: str) -> dict:
     """Execute a read-only SQL query against the thermal battery BigQuery dataset.
 
@@ -50,11 +59,13 @@ def query_bigquery(sql_query: str) -> dict:
         dict with 'status', 'row_count', and 'data' (list of row dicts) or 'error_message'.
     """
     if not sql_query.strip().upper().startswith("SELECT"):
-        return {"status": "error", "error_message": "Only SELECT queries are allowed."}
+        # Also allow WITH (CTE) queries
+        if not sql_query.strip().upper().startswith("WITH"):
+            return {"status": "error", "error_message": "Only SELECT/WITH queries are allowed."}
 
-    # Force a LIMIT if none is present to prevent massive result sets
+    # Force a LIMIT if none is present — but skip for aggregation queries
     sql_upper = sql_query.strip().upper()
-    if "LIMIT" not in sql_upper:
+    if "LIMIT" not in sql_upper and not _is_aggregation_query(sql_query):
         sql_query = sql_query.rstrip().rstrip(";") + f" LIMIT {MAX_ROWS_FOR_LLM}"
 
     try:
@@ -64,7 +75,14 @@ def query_bigquery(sql_query: str) -> dict:
 
         rows = []
         for row in results:
-            rows.append(dict(row.items()))
+            row_dict = {}
+            for k, v in dict(row.items()).items():
+                # Round floats for cleaner output
+                if isinstance(v, float):
+                    row_dict[k] = round(v, 6)
+                else:
+                    row_dict[k] = v
+            rows.append(row_dict)
 
         # Hard cap to prevent token overflow
         truncated = len(rows) > MAX_ROWS_FOR_LLM
@@ -380,3 +398,240 @@ def get_discharge_summary(battery_code: str) -> dict:
         ORDER BY SAFE_CAST(build_number AS INT64), discharge_type
     """
     return query_bigquery(sql)
+
+
+# ── Generic computation tools (for ANY rulebook calculation) ─
+
+
+def run_aggregation_query(sql_query: str) -> dict:
+    """Execute an aggregation SQL query with NO row limit. Use this for complex
+    computations that require processing ALL data points.
+
+    This is the PRIMARY tool for implementing ANY rulebook calculation.
+    The LLM should write custom SQL to compute whatever the rule requires.
+
+    IMPORTANT GUIDELINES:
+    - MUST contain GROUP BY, SUM, AVG, COUNT, or similar aggregation
+    - Always filter by battery_code and build_number in WHERE clause
+    - Use CTEs (WITH clauses) for multi-step calculations
+    - Results should be aggregated/summarized (not raw rows)
+    - Maximum 500 result rows
+
+    PROJECT: thermal-battery-agent-ds1
+    DATASET: thermal_battery_data
+    TABLES:
+      - discharge_data: battery_code, battery_name, build_number, discharge_temperature,
+        discharge_type, time_seconds, voltage_volts, discharge_current_amps,
+        cutoff_voltage_high_temp, cutoff_voltage_low_temp, target_duration_seconds,
+        max_open_circuit_voltage, max_activation_time_ms
+      - design_parameters: battery_code, battery_name, build_number, serial_number,
+        parameter_name, parameter_value, unit
+      - customer_specs: battery_code, battery_name, parameter_name, parameter_value, unit
+      - temperature_data: battery_code, battery_name, build_number, time_seconds, t1, t2, t3
+
+    EXAMPLE - Ampere-seconds capacity to a cut-off voltage:
+      WITH intervals AS (
+        SELECT time_seconds, discharge_current_amps, voltage_volts,
+               time_seconds - LAG(time_seconds) OVER (ORDER BY time_seconds) AS dt
+        FROM `thermal-battery-agent-ds1.thermal_battery_data.discharge_data`
+        WHERE battery_code = '46' AND build_number = '208'
+          AND discharge_temperature = '+55'
+      )
+      SELECT ROUND(SUM(discharge_current_amps * dt), 4) AS ampere_seconds
+      FROM intervals
+      WHERE voltage_volts >= 20.0  -- cut-off voltage
+        AND dt IS NOT NULL
+
+    Args:
+        sql_query: A BigQuery SQL query with aggregation. Must be SELECT or WITH.
+
+    Returns:
+        dict with 'status', 'row_count', and 'data' (list of row dicts).
+    """
+    sql_stripped = sql_query.strip().upper()
+    if not (sql_stripped.startswith("SELECT") or sql_stripped.startswith("WITH")):
+        return {"status": "error", "error_message": "Only SELECT/WITH queries are allowed."}
+
+    # Safety: block DELETE, DROP, INSERT, UPDATE
+    for forbidden in ["DELETE", "DROP", "INSERT", "UPDATE", "ALTER", "TRUNCATE", "CREATE"]:
+        if forbidden in sql_stripped.split("--")[0]:  # Ignore comments
+            # Only block if it's a statement keyword (not in a string or column name)
+            import re
+            if re.search(rf'\b{forbidden}\b', sql_query.upper().split('--')[0]):
+                return {"status": "error", "error_message": f"{forbidden} statements are not allowed."}
+
+    MAX_AGG_ROWS = 500
+
+    try:
+        client = _get_bq_client()
+        query_job = client.query(sql_query)
+        results = query_job.result()
+
+        rows = []
+        for row in results:
+            row_dict = {}
+            for k, v in dict(row.items()).items():
+                if isinstance(v, float):
+                    row_dict[k] = round(v, 6)
+                else:
+                    row_dict[k] = v
+            rows.append(row_dict)
+
+        if len(rows) > MAX_AGG_ROWS:
+            return {
+                "status": "error",
+                "error_message": f"Query returned {len(rows)} rows, exceeding max of {MAX_AGG_ROWS}. "
+                                 "Add more GROUP BY or WHERE filters to reduce results.",
+            }
+
+        return {
+            "status": "success",
+            "row_count": len(rows),
+            "computation": "Server-side BigQuery SQL",
+            "data": rows,
+        }
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}
+
+
+def compute_capacity_at_voltage(
+    battery_code: str,
+    build_number: str,
+    cutoff_voltage: float,
+    discharge_temperature: Optional[str] = None,
+) -> dict:
+    """Compute Ampere-seconds capacity of a battery build at a given cut-off voltage.
+
+    Implements Rule 4.6.4: Capacity = SUM(Current × Time_Interval) for duration
+    until battery voltage reaches the specified cut-off voltage.
+
+    This is a GENERIC tool — works for ANY cut-off voltage, not just the customer-specified one.
+    Use this for Table-5 (Active Material Utilization) and any capacity calculation.
+
+    Args:
+        battery_code: Battery code (e.g. '46')
+        build_number: Build number (e.g. '208')
+        cutoff_voltage: The cut-off voltage in Volts (e.g. 24.0, 20.0, 16.0)
+        discharge_temperature: Optional temperature filter (e.g. '+55')
+
+    Returns:
+        dict with ampere_seconds capacity, discharge_duration to that voltage,
+        and additional statistics.
+    """
+    temp_filter = ""
+    if discharge_temperature:
+        temp_filter = f"AND discharge_temperature = '{discharge_temperature}'"
+
+    sql = f"""
+        WITH ordered AS (
+            SELECT
+                time_seconds,
+                voltage_volts,
+                discharge_current_amps,
+                discharge_temperature,
+                discharge_type,
+                LAG(time_seconds) OVER (
+                    PARTITION BY discharge_temperature, discharge_type
+                    ORDER BY time_seconds
+                ) AS prev_time,
+                LAG(voltage_volts) OVER (
+                    PARTITION BY discharge_temperature, discharge_type
+                    ORDER BY time_seconds
+                ) AS prev_voltage
+            FROM {_full_table('discharge_data')}
+            WHERE battery_code = '{battery_code}'
+              AND build_number = '{build_number}'
+              {temp_filter}
+        ),
+        -- Find the time when voltage drops below cut-off (after peak)
+        peak AS (
+            SELECT
+                discharge_temperature, discharge_type,
+                MIN(CASE WHEN voltage_volts = max_v THEN time_seconds END) AS peak_time
+            FROM (
+                SELECT *, MAX(voltage_volts) OVER (
+                    PARTITION BY discharge_temperature, discharge_type
+                ) AS max_v
+                FROM ordered
+            )
+            GROUP BY discharge_temperature, discharge_type
+        ),
+        cutoff_time AS (
+            SELECT
+                o.discharge_temperature,
+                o.discharge_type,
+                -- Last time voltage was at or above cut-off (falling phase)
+                MAX(CASE
+                    WHEN o.time_seconds > p.peak_time AND o.voltage_volts >= {cutoff_voltage}
+                    THEN o.time_seconds
+                END) AS time_at_cutoff
+            FROM ordered o
+            JOIN peak p ON o.discharge_temperature = p.discharge_temperature
+                       AND o.discharge_type = p.discharge_type
+            GROUP BY o.discharge_temperature, o.discharge_type
+        ),
+        -- Compute capacity: sum of (current × delta_time) up to cut-off time
+        capacity AS (
+            SELECT
+                o.discharge_temperature,
+                o.discharge_type,
+                ROUND(SUM(
+                    CASE
+                        WHEN o.prev_time IS NOT NULL
+                         AND o.time_seconds <= COALESCE(c.time_at_cutoff, 999999)
+                        THEN o.discharge_current_amps * (o.time_seconds - o.prev_time)
+                        ELSE 0
+                    END
+                ), 4) AS ampere_seconds,
+                ROUND(MAX(CASE
+                    WHEN o.time_seconds <= COALESCE(c.time_at_cutoff, 999999)
+                    THEN o.discharge_current_amps
+                END), 4) AS max_current_A,
+                ROUND(AVG(CASE
+                    WHEN o.time_seconds <= COALESCE(c.time_at_cutoff, 999999)
+                         AND o.discharge_current_amps > 0.5
+                    THEN o.discharge_current_amps
+                END), 4) AS avg_current_A,
+                COUNT(CASE
+                    WHEN o.time_seconds <= COALESCE(c.time_at_cutoff, 999999)
+                    THEN 1
+                END) AS data_points_used,
+                c.time_at_cutoff AS discharge_duration_s
+            FROM ordered o
+            LEFT JOIN cutoff_time c ON o.discharge_temperature = c.discharge_temperature
+                                   AND o.discharge_type = c.discharge_type
+            GROUP BY o.discharge_temperature, o.discharge_type, c.time_at_cutoff
+        )
+        SELECT * FROM capacity
+        ORDER BY discharge_temperature, discharge_type
+    """
+
+    try:
+        client = _get_bq_client()
+        result = client.query(sql).result()
+
+        results = []
+        for row in result:
+            r = dict(row.items())
+            results.append({
+                "discharge_temperature": r.get("discharge_temperature"),
+                "discharge_type": r.get("discharge_type"),
+                "cutoff_voltage_V": cutoff_voltage,
+                "ampere_seconds": round(r["ampere_seconds"], 4) if r.get("ampere_seconds") else 0,
+                "discharge_duration_to_cutoff_s": round(r["discharge_duration_s"], 4) if r.get("discharge_duration_s") else None,
+                "avg_current_A": round(r["avg_current_A"], 4) if r.get("avg_current_A") else None,
+                "max_current_A": round(r["max_current_A"], 4) if r.get("max_current_A") else None,
+                "data_points_used": r.get("data_points_used"),
+            })
+
+        return {
+            "status": "success",
+            "battery_code": battery_code,
+            "build_number": build_number,
+            "cutoff_voltage_V": cutoff_voltage,
+            "computation": "Server-side BigQuery SQL (ALL data points)",
+            "rulebook_reference": "Rule 4.6.4 - Ampere seconds Capacity",
+            "results": results,
+        }
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}

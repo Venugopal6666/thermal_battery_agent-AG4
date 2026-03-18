@@ -9,6 +9,8 @@ from tools.bigquery_tools import (
     get_design_parameters,
     get_discharge_summary,
     query_bigquery,
+    run_aggregation_query,
+    compute_capacity_at_voltage,
 )
 
 from tools.discharge_analysis_tools import (
@@ -82,6 +84,9 @@ Brief answer with exact numbers.
 ### Analysis
 Interpretation with exact numbers from tool responses.""",
     tools=[
+        # Generic computation (handles ANY rulebook calculation)
+        run_aggregation_query,
+        compute_capacity_at_voltage,
         # Specialized discharge analysis
         analyze_build_complete,
         calculate_discharge_duration,
