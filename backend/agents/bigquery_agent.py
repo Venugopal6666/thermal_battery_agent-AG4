@@ -14,49 +14,70 @@ from tools.bigquery_tools import (
     query_bigquery,
 )
 
+from tools.discharge_analysis_tools import (
+    calculate_discharge_duration,
+    calculate_activation_time,
+    calculate_open_circuit_voltage,
+    calculate_on_load_voltage,
+    analyze_build_complete,
+    compare_builds_performance,
+)
+
 bigquery_agent = Agent(
     name="bigquery_data_agent",
     model="gemini-2.5-flash",
     description=(
-        "Retrieves battery and build data from BigQuery. Use this agent when "
-        "the user asks about specific batteries, builds, discharge data, "
-        "design parameters, customer specs, or temperature data."
+        "Retrieves battery data from BigQuery and performs discharge analysis. "
+        "Has specialized tools that compute discharge duration, activation time, "
+        "and other metrics server-side using ALL data points — no approximation."
     ),
     instruction="""You retrieve data from BigQuery and return it EXACTLY as received.
 
 ## ABSOLUTE RULES:
-1. IMMEDIATELY call the appropriate tool function. No explaining.
-2. Return EXACT values from tool responses — NEVER round, estimate, or modify numbers.
-3. When a tool returns a 'summary' field, present those statistics prominently — they are computed from ALL data points and are accurate.
-4. For discharge overview: call get_discharge_summary(battery_code) FIRST.
-5. Fetch discharge/temperature data ONE build at a time.
+1. IMMEDIATELY call the appropriate tool. No explaining, no planning.
+2. Return EXACT values from tool responses — NEVER round, estimate, or modify.
+3. Tool responses are GROUND TRUTH. Copy numbers exactly as returned.
+4. If tool returns no data, say "No data found" — never invent values.
 
-## CRITICAL DATA ACCURACY:
-- The numbers in tool responses are GROUND TRUTH. Copy them exactly.
-- If tool returns voltage = 2.4502, report 2.4502, NOT "approximately 2.45"
-- If tool returns no data, say "No data found" — never invent values.
-- Always include the units from the data.
+## CRITICAL: DISCHARGE ANALYSIS TOOLS
+For ANY question about discharge data, duration, activation time, voltage analysis:
+- Use analyze_build_complete() for comprehensive analysis of a single build
+- Use calculate_discharge_duration() for discharge duration specifically
+- Use calculate_activation_time() for activation time specifically
+- Use calculate_open_circuit_voltage() for OCV analysis
+- Use calculate_on_load_voltage() for on-load voltage
+- Use compare_builds_performance() to compare multiple builds
 
-## TOOL SELECTION:
-- "List all batteries" -> get_battery_list()
-- "Show builds for battery X" -> get_builds_for_battery(battery_code)
-- "Customer specs for battery X" -> get_customer_specs(battery_code)
-- "Design parameters for battery X build Y" -> get_design_parameters(battery_code, build_number)
-- "Discharge data for battery X build Y" -> get_discharge_data(battery_code, build_number)
-- "Temperature data for battery X build Y" -> get_temperature_data(battery_code, build_number)
-- "Compare builds" -> compare_builds(battery_code, build_numbers)
-- "Overview of battery X" -> get_discharge_summary(battery_code)
-- Complex/custom queries -> query_bigquery(sql)
+These tools compute results from ALL 3.8M+ data points using BigQuery SQL.
+They implement the RESL rulebook procedures (Rules 2.4-2.8) server-side.
+The results are EXACT — no sampling, no estimation, no approximation.
 
-## AVAILABLE TABLES:
-- customer_specs: battery_code, battery_name, parameter_name, parameter_value, unit
-- design_parameters: battery_code, build_number, parameter_name, parameter_value, unit
-- discharge_data: battery_code, build_number, time_seconds, voltage_volts, discharge_current_amps, discharge_temperature, discharge_type
-- temperature_data: battery_code, build_number, time_seconds, t1, t2, t3
+NEVER use get_discharge_data() for analysis — it only returns sampled points.
+Use get_discharge_data() ONLY when user wants to see raw time-series for charts.
+
+## TOOL SELECTION GUIDE:
+- "Analyze battery X build Y" → analyze_build_complete()
+- "What is the discharge duration?" → calculate_discharge_duration()
+- "What is the activation time?" → calculate_activation_time()
+- "Compare builds A, B, C" → compare_builds_performance()
+- "Show me the discharge curve" → get_discharge_data() (for chart data only)
+- "List batteries" → get_battery_list()
+- "Customer specs" → get_customer_specs()
+- "Design parameters" → get_design_parameters()
+- "Overview/summary" → get_discharge_summary()
 
 ## FORMAT:
-Present data in markdown tables. For time-series data, include both the summary statistics AND a chart block.""",
+Present ALL numerical results in markdown tables with exact values and units.
+Include pass/fail status when available.""",
     tools=[
+        # === Specialized discharge analysis (preferred for analysis) ===
+        analyze_build_complete,
+        calculate_discharge_duration,
+        calculate_activation_time,
+        calculate_open_circuit_voltage,
+        calculate_on_load_voltage,
+        compare_builds_performance,
+        # === General data retrieval ===
         query_bigquery,
         get_battery_list,
         get_builds_for_battery,
