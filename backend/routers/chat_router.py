@@ -83,6 +83,45 @@ AGENT_DESCRIPTIONS = {
 }
 
 
+def _is_code_dump(text: str) -> bool:
+    """Detect if text is a raw code dump (tool definitions leaked by the LLM).
+    Returns True if the text looks like Python function/class definitions rather
+    than a genuine response to the user."""
+    stripped = text.strip()
+    # Check for Python function/class definition patterns
+    code_indicators = [
+        'def transfer_to_agent(',
+        'def run_aggregation_query(',
+        'def compute_capacity_at_voltage(',
+        'def query_bigquery(',
+        'def analyze_build_complete(',
+        'def calculate_discharge_duration(',
+        'def calculate_activation_time(',
+        'def calculate_open_circuit_voltage(',
+        'def calculate_on_load_voltage(',
+        'def compare_builds_performance(',
+        'def get_battery_list(',
+        'def get_builds_for_battery(',
+        'def get_customer_specs(',
+        'def get_design_parameters(',
+        'def get_discharge_data(',
+        'def get_temperature_data(',
+        'def compare_builds(',
+        'def get_discharge_summary(',
+    ]
+    # If the text contains multiple function definitions, it's a code dump
+    matches = sum(1 for indicator in code_indicators if indicator in stripped)
+    if matches >= 2:
+        return True
+    # If it starts with 'def ' or 'class ' and looks like raw code
+    lines = stripped.split('\n')
+    if len(lines) > 3:
+        def_count = sum(1 for line in lines if line.strip().startswith('def ') or line.strip().startswith('class '))
+        if def_count >= 2:
+            return True
+    return False
+
+
 # ── Schemas ─────────────────────────────────────────────────
 
 class SendMessageRequest(BaseModel):
@@ -302,10 +341,15 @@ async def _run_agent_once(conversation_id: str, user_message: str, mode: str) ->
         # Collect the final response text
         if event.content and event.content.parts:
             for part in event.content.parts:
-                if part.text:
-                    response_text += part.text
-                if hasattr(part, 'thought') and part.thought:
+                # Separate thinking from response
+                is_thought = hasattr(part, 'thought') and part.thought
+                if is_thought:
                     thinking_content = (thinking_content or "") + (part.text or "")
+                elif part.text:
+                    text = part.text.strip()
+                    # Filter out raw Python code dumps (tool definitions leaked)
+                    if text and not _is_code_dump(text):
+                        response_text += part.text
 
         # Track function calls for metadata and thinking steps
         if event.content and event.content.parts:
@@ -447,10 +491,15 @@ async def _run_agent_streaming(conversation_id: str, user_message: str, mode: st
             ):
                 if event.content and event.content.parts:
                     for part in event.content.parts:
-                        if part.text:
-                            response_text += part.text
-                        if hasattr(part, 'thought') and part.thought:
+                        # Separate thinking from response
+                        is_thought = hasattr(part, 'thought') and part.thought
+                        if is_thought:
                             thinking_content = (thinking_content or "") + (part.text or "")
+                        elif part.text:
+                            text = part.text.strip()
+                            # Filter out raw Python code dumps
+                            if text and not _is_code_dump(text):
+                                response_text += part.text
 
                         # Stream function calls as thinking steps
                         if hasattr(part, 'function_call') and part.function_call:
