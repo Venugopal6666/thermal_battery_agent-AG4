@@ -499,6 +499,7 @@ def compute_capacity_at_voltage(
     build_number: str,
     cutoff_voltage: float,
     discharge_temperature: Optional[str] = None,
+    cutoff_voltage_per_cell: Optional[float] = None,
 ) -> dict:
     """Compute Ampere-seconds capacity of a battery build at a given cut-off voltage.
 
@@ -508,16 +509,50 @@ def compute_capacity_at_voltage(
     This is a GENERIC tool — works for ANY cut-off voltage, not just the customer-specified one.
     Use this for Table-5 (Active Material Utilization) and any capacity calculation.
 
+    Per Rule 4.6.1: The standard per-cell cut-off voltages are 1.2, 1.3, 1.4, 1.5, 1.6 volts.
+    Per Rule 4.6.2: Number of cells = "Cells in Series" from Design Data.
+    Per Rule 4.6.3: Battery Cut-Off Voltage = Cells in Series × Cut-Off Voltage per Cell.
+
+    You can specify EITHER:
+    - cutoff_voltage: The absolute battery cut-off voltage in Volts (e.g. 24.0)
+    - cutoff_voltage_per_cell: The per-cell voltage (e.g. 1.4). The tool will look up
+      "Cells in Series" from design_parameters and compute the battery voltage automatically.
+
     Args:
         battery_code: Battery code (e.g. '46')
         build_number: Build number (e.g. '208')
-        cutoff_voltage: The cut-off voltage in Volts (e.g. 24.0, 20.0, 16.0)
+        cutoff_voltage: The cut-off voltage in Volts (e.g. 24.0, 20.0, 16.0).
+                        If cutoff_voltage_per_cell is provided, this is ignored.
         discharge_temperature: Optional temperature filter (e.g. '+55')
+        cutoff_voltage_per_cell: Optional per-cell cut-off voltage (e.g. 1.2, 1.3, 1.4, 1.5, 1.6).
+                                 If provided, looks up Cells in Series and computes battery voltage.
 
     Returns:
         dict with ampere_seconds capacity, discharge_duration to that voltage,
         and additional statistics.
     """
+    # If per-cell voltage is given, compute battery-level voltage from Cells in Series
+    cells_in_series = None
+    if cutoff_voltage_per_cell is not None:
+        try:
+            client = _get_bq_client()
+            cells_sql = f"""
+                SELECT SAFE_CAST(parameter_value AS FLOAT64) AS cells
+                FROM {_full_table('design_parameters')}
+                WHERE battery_code = '{battery_code}'
+                  AND build_number = '{build_number}'
+                  AND parameter_name = 'Cells in Series'
+                LIMIT 1
+            """
+            result = client.query(cells_sql).result()
+            for row in result:
+                cells_in_series = int(row["cells"])  # Always a whole number
+            if cells_in_series is None:
+                return {"status": "error", "error_message": "Could not find 'Cells in Series' in design_parameters."}
+            cutoff_voltage = round(cells_in_series * cutoff_voltage_per_cell, 4)
+        except Exception as e:
+            return {"status": "error", "error_message": f"Error looking up Cells in Series: {e}"}
+
     temp_filter = ""
     if discharge_temperature:
         temp_filter = f"AND discharge_temperature = '{discharge_temperature}'"
@@ -624,7 +659,7 @@ def compute_capacity_at_voltage(
                 "data_points_used": r.get("data_points_used"),
             })
 
-        return {
+        result_dict = {
             "status": "success",
             "battery_code": battery_code,
             "build_number": build_number,
@@ -633,5 +668,14 @@ def compute_capacity_at_voltage(
             "rulebook_reference": "Rule 4.6.4 - Ampere seconds Capacity",
             "results": results,
         }
+        # Include per-cell info if used
+        if cutoff_voltage_per_cell is not None:
+            result_dict["cutoff_voltage_per_cell_V"] = cutoff_voltage_per_cell
+            result_dict["cells_in_series"] = cells_in_series
+            result_dict["computation_note"] = (
+                f"Battery Cut-Off Voltage = {cells_in_series} cells × "
+                f"{cutoff_voltage_per_cell} V/cell = {cutoff_voltage} V (per Rule 4.6.3)"
+            )
+        return result_dict
     except Exception as e:
         return {"status": "error", "error_message": str(e)}
