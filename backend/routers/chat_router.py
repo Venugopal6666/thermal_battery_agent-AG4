@@ -341,15 +341,21 @@ async def _run_agent_once(conversation_id: str, user_message: str, mode: str) ->
         # Collect the final response text
         if event.content and event.content.parts:
             for part in event.content.parts:
-                # Separate thinking from response
+                # Track thinking content separately for the UI thinking panel
                 is_thought = hasattr(part, 'thought') and part.thought
-                if is_thought:
-                    thinking_content = (thinking_content or "") + (part.text or "")
-                elif part.text:
+                if is_thought and part.text:
+                    thinking_content = (thinking_content or "") + part.text
+                
+                # Collect response text from ALL non-thought text parts
+                # (Gemini 2.5 Flash final answer comes as non-thought text)
+                if part.text and not is_thought:
                     text = part.text.strip()
-                    # Filter out raw Python code dumps (tool definitions leaked)
-                    if text and not _is_code_dump(text):
+                    is_code = _is_code_dump(text) if text else False
+                    if is_code:
+                        logger.warning(f"[FILTERED CODE DUMP] len={len(part.text)} preview={repr(part.text[:100])}")
+                    elif text:
                         response_text += part.text
+                        logger.debug(f"[RESPONSE] len={len(part.text)} preview={repr(part.text[:80])}")
 
         # Track function calls for metadata and thinking steps
         if event.content and event.content.parts:
@@ -491,14 +497,18 @@ async def _run_agent_streaming(conversation_id: str, user_message: str, mode: st
             ):
                 if event.content and event.content.parts:
                     for part in event.content.parts:
-                        # Separate thinking from response
+                        # Track thinking content separately
                         is_thought = hasattr(part, 'thought') and part.thought
-                        if is_thought:
-                            thinking_content = (thinking_content or "") + (part.text or "")
-                        elif part.text:
+                        if is_thought and part.text:
+                            thinking_content = (thinking_content or "") + part.text
+                        
+                        # Collect response text from ALL non-thought text parts
+                        if part.text and not is_thought:
                             text = part.text.strip()
-                            # Filter out raw Python code dumps
-                            if text and not _is_code_dump(text):
+                            is_code = _is_code_dump(text) if text else False
+                            if is_code:
+                                logger.warning(f"[STREAM FILTERED] code dump len={len(part.text)}")
+                            elif text:
                                 response_text += part.text
 
                         # Stream function calls as thinking steps
