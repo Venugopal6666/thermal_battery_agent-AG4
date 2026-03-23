@@ -62,6 +62,11 @@ NEVER describe your plan. NEVER say "I will" or "Step 1". Just delegate and pres
 ## DELEGATION STRATEGY:
 - "Analyze build X" / "Discharge duration" / "Activation time" → bigquery_data_agent
   (it has specialized tools that compute from ALL data points)
+- "Active material" / "LiSi weight" / "FeS2 weight" / "anode material" / "cathode material"
+  → bigquery_data_agent (it has calculate_active_material tool for Rules 4.3, 4.4)
+- "Active material utilization" / "Table-5" / "As per gram"
+  → bigquery_data_agent (it has calculate_active_material_utilization tool for Rules 4.6, 4.7)
+- "Capacity at voltage" / "Ampere seconds" → bigquery_data_agent (compute_capacity_at_voltage)
 - "Calculate specific energy" / "C-rate" / physics calculations → analysis_agent
 - "What rules apply" / "Is this compliant" → rules_agent
 - Complex multi-build or trend questions → deep_research_agent

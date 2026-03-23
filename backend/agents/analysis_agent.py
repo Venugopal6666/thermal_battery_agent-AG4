@@ -3,6 +3,8 @@
 from google.adk.agents import Agent
 
 from tools.bigquery_tools import (
+    calculate_active_material,
+    calculate_active_material_utilization,
     get_discharge_data,
     get_temperature_data,
     get_customer_specs,
@@ -87,6 +89,8 @@ Interpretation with exact numbers from tool responses.""",
         # Generic computation (handles ANY rulebook calculation)
         run_aggregation_query,
         compute_capacity_at_voltage,
+        calculate_active_material,
+        calculate_active_material_utilization,
         # Specialized discharge analysis
         analyze_build_complete,
         calculate_discharge_duration,

@@ -68,6 +68,8 @@ TOOL_DESCRIPTIONS = {
     # Generic computation tools
     "run_aggregation_query": "🧮 Running server-side aggregation (all data points)...",
     "compute_capacity_at_voltage": "⚡ Computing Ampere-seconds capacity at cut-off voltage...",
+    "calculate_active_material": "🧪 Computing active material (LiSi/FeS2) per Rules 4.3 & 4.4...",
+    "calculate_active_material_utilization": "📊 Computing active material utilization (Table-5) per Rules 4.6 & 4.7...",
     "search_rules": "📖 Searching rulebook...",
     "get_rules_by_category": "📂 Fetching rules by category...",
     "transfer_to_agent": "🤖 Delegating to sub-agent...",

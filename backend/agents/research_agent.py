@@ -3,6 +3,8 @@
 from google.adk.agents import Agent
 
 from tools.bigquery_tools import (
+    calculate_active_material,
+    calculate_active_material_utilization,
     compare_builds,
     compute_capacity_at_voltage,
     get_battery_list,
@@ -90,6 +92,8 @@ Actionable next steps.""",
         # Generic computation (handles ANY rulebook calculation)
         run_aggregation_query,
         compute_capacity_at_voltage,
+        calculate_active_material,
+        calculate_active_material_utilization,
         # Specialized discharge analysis (PRIMARY)
         analyze_build_complete,
         compare_builds_performance,

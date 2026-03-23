@@ -679,3 +679,234 @@ def compute_capacity_at_voltage(
         return result_dict
     except Exception as e:
         return {"status": "error", "error_message": str(e)}
+
+
+def calculate_active_material(
+    battery_code: str,
+    build_number: str,
+) -> dict:
+    """Calculate Anode Active Material (LiSi) and Cathode Active Material (FeS2)
+    for a given battery build, per Rulebook Rules 4.3 and 4.4.
+
+    This tool implements the EXACT procedure from the rulebook:
+
+    Anode Active Material (Rule 4.3):
+      Step 1 (4.3.1): Get "Anode Weight per Electrode" from Design Data
+      Step 2 (4.3.2): Get "Stacks in Parallel" from Design Data
+      Step 3 (4.3.3): Total Anode Material = Anode Weight per Electrode × Stacks in Parallel
+      Step 4 (4.3.4): Get "Anode Pellet - LiSi: Electrolyte Ratio" (e.g. 80:20 → 80%)
+      Step 5 (4.3.5): Anode Active Material = Total Anode Material × (Percentage / 100)
+
+    Cathode Active Material (Rule 4.4):
+      Step 1 (4.4.1): Get "Cathode Weight per Electrode" from Design Data
+      Step 2 (4.4.2): Get "Stacks in Parallel" from Design Data
+      Step 3 (4.4.3): Total Cathode Material = Cathode Weight per Electrode × Stacks in Parallel
+      Step 4 (4.4.4): Get "Cathode Pellet - FeS2: Electrolyte Ratio" (e.g. 73.5:25 → 73.5%)
+      Step 5 (4.4.5): Cathode Active Material = Total Cathode Material × (Percentage / 100)
+
+    Args:
+        battery_code: The battery type code (e.g., "46")
+        build_number: The build number (e.g., "208")
+
+    Returns:
+        dict with detailed calculation breakdown and results.
+    """
+    import re
+
+    try:
+        client = _get_bq_client()
+
+        # Fetch all required design parameters in one query
+        param_names = [
+            "Anode Weight per Electrode",
+            "Cathode Weight per Electrode",
+            "Stacks in Parallel",
+            "Anode Pellet - LiSi: Electrolyte Ratio",
+            "Cathode Pellet - FeS2: Electrolyte Ratio",
+        ]
+        placeholders = ", ".join(f"'{p}'" for p in param_names)
+        sql = f"""
+            SELECT parameter_name, parameter_value, unit
+            FROM {_full_table('design_parameters')}
+            WHERE battery_code = '{battery_code}'
+              AND build_number = '{build_number}'
+              AND parameter_name IN ({placeholders})
+        """
+        result = client.query(sql).result()
+        params = {}
+        for row in result:
+            params[row["parameter_name"]] = row["parameter_value"]
+
+        # Validate all required params exist
+        missing = [p for p in param_names if p not in params or not params[p]]
+        if missing:
+            return {
+                "status": "error",
+                "error_message": f"Missing design parameters: {missing}. Check battery_code={battery_code}, build_number={build_number}.",
+            }
+
+        # Extract numeric values
+        anode_weight = float(params["Anode Weight per Electrode"])
+        cathode_weight = float(params["Cathode Weight per Electrode"])
+        stacks_parallel = int(float(params["Stacks in Parallel"]))
+
+        # Parse ratio strings: "(80:20)" → 80.0
+        anode_ratio_str = params["Anode Pellet - LiSi: Electrolyte Ratio"]
+        cathode_ratio_str = params["Cathode Pellet - FeS2: Electrolyte Ratio"]
+
+        anode_match = re.search(r'([\d.]+)\s*:\s*([\d.]+)', anode_ratio_str)
+        cathode_match = re.search(r'([\d.]+)\s*:\s*([\d.]+)', cathode_ratio_str)
+
+        if not anode_match:
+            return {"status": "error", "error_message": f"Cannot parse Anode ratio: '{anode_ratio_str}'"}
+        if not cathode_match:
+            return {"status": "error", "error_message": f"Cannot parse Cathode ratio: '{cathode_ratio_str}'"}
+
+        anode_active_pct = float(anode_match.group(1))   # e.g. 80.0
+        cathode_active_pct = float(cathode_match.group(1))  # e.g. 73.5
+
+        # Rule 4.3.3: Total Anode Material
+        total_anode = anode_weight * stacks_parallel
+
+        # Rule 4.3.5: Anode Active Material (LiSi)
+        anode_active = total_anode * (anode_active_pct / 100.0)
+
+        # Rule 4.4.3: Total Cathode Material
+        total_cathode = cathode_weight * stacks_parallel
+
+        # Rule 4.4.5: Cathode Active Material (FeS2)
+        cathode_active = total_cathode * (cathode_active_pct / 100.0)
+
+        return {
+            "status": "success",
+            "battery_code": battery_code,
+            "build_number": build_number,
+            "computation": "Server-side (design_parameters → active material)",
+            "design_parameters_used": {
+                "Anode Weight per Electrode (g)": anode_weight,
+                "Cathode Weight per Electrode (g)": cathode_weight,
+                "Stacks in Parallel": stacks_parallel,
+                "Anode Pellet - LiSi: Electrolyte Ratio": anode_ratio_str,
+                "Cathode Pellet - FeS2: Electrolyte Ratio": cathode_ratio_str,
+            },
+            "anode_calculation": {
+                "rule_reference": "Rule 4.3",
+                "step_4_3_3_Total_Anode_Material_g": round(total_anode, 6),
+                "step_4_3_3_formula": f"{anode_weight} g × {stacks_parallel} = {round(total_anode, 6)} g",
+                "step_4_3_4_LiSi_percentage": anode_active_pct,
+                "step_4_3_5_Anode_Active_Material_LiSi_g": round(anode_active, 6),
+                "step_4_3_5_formula": f"{round(total_anode, 6)} g × {anode_active_pct / 100} = {round(anode_active, 6)} g",
+            },
+            "cathode_calculation": {
+                "rule_reference": "Rule 4.4",
+                "step_4_4_3_Total_Cathode_Material_g": round(total_cathode, 6),
+                "step_4_4_3_formula": f"{cathode_weight} g × {stacks_parallel} = {round(total_cathode, 6)} g",
+                "step_4_4_4_FeS2_percentage": cathode_active_pct,
+                "step_4_4_5_Cathode_Active_Material_FeS2_g": round(cathode_active, 6),
+                "step_4_4_5_formula": f"{round(total_cathode, 6)} g × {cathode_active_pct / 100} = {round(cathode_active, 6)} g",
+            },
+            "summary": {
+                "Anode_Active_Material_LiSi_g": round(anode_active, 6),
+                "Cathode_Active_Material_FeS2_g": round(cathode_active, 6),
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}
+
+
+def calculate_active_material_utilization(
+    battery_code: str,
+    build_number: str,
+    discharge_temperature: Optional[str] = None,
+) -> dict:
+    """Calculate Ampere-seconds per gram of LiSi and FeS2 for Table-5/Table-6
+    (Active Material Utilization), per Rulebook Rules 4.6 and 4.7.
+
+    This tool does everything in ONE call:
+    1. Computes Anode Active Material (LiSi) and Cathode Active Material (FeS2) per Rules 4.3, 4.4
+    2. For each of the 5 standard cut-off voltages (1.2, 1.3, 1.4, 1.5, 1.6 V/cell per Rule 4.6.1):
+       - Computes Ampere-seconds capacity (Rule 4.6.4)
+       - Computes Ampere-seconds per gram of LiSi (Rule 4.7.1)
+       - Computes Ampere-seconds per gram of FeS2 (Rule 4.7.2)
+
+    Args:
+        battery_code: Battery code (e.g., "46")
+        build_number: Build number (e.g., "208")
+        discharge_temperature: Optional temperature filter (e.g., "+55")
+
+    Returns:
+        dict with complete Table-5 data for active material utilization.
+    """
+    # Step 1: Get active material
+    active_mat = calculate_active_material(battery_code, build_number)
+    if active_mat.get("status") != "success":
+        return active_mat
+
+    lisi_g = active_mat["summary"]["Anode_Active_Material_LiSi_g"]
+    fes2_g = active_mat["summary"]["Cathode_Active_Material_FeS2_g"]
+
+    # Step 2: Compute capacity at each standard per-cell voltage (Rule 4.6.1)
+    per_cell_voltages = [1.2, 1.3, 1.4, 1.5, 1.6]
+    table_rows = []
+
+    for i, v_per_cell in enumerate(per_cell_voltages, start=1):
+        cap_result = compute_capacity_at_voltage(
+            battery_code=battery_code,
+            build_number=build_number,
+            cutoff_voltage=0,  # Will be overridden by cutoff_voltage_per_cell
+            discharge_temperature=discharge_temperature,
+            cutoff_voltage_per_cell=v_per_cell,
+        )
+
+        if cap_result.get("status") != "success":
+            table_rows.append({
+                "S_No": i,
+                "cutoff_voltage_per_cell_V": v_per_cell,
+                "error": cap_result.get("error_message", "Unknown error"),
+            })
+            continue
+
+        battery_voltage = cap_result.get("cutoff_voltage_V", 0)
+        cells = cap_result.get("cells_in_series", 0)
+
+        # Process each discharge condition
+        for res in cap_result.get("results", []):
+            ampere_seconds = res.get("ampere_seconds", 0)
+
+            # Rule 4.7.1: As per gram of LiSi
+            as_per_gram_lisi = round(ampere_seconds / lisi_g, 4) if lisi_g > 0 else 0
+            # Rule 4.7.2: As per gram of FeS2
+            as_per_gram_fes2 = round(ampere_seconds / fes2_g, 4) if fes2_g > 0 else 0
+
+            table_rows.append({
+                "S_No": i,
+                "cutoff_voltage_per_cell_V": v_per_cell,
+                "cells_in_series": cells,
+                "battery_cutoff_voltage_V": battery_voltage,
+                "ampere_seconds_capacity": round(ampere_seconds, 4),
+                "As_per_gram_LiSi": as_per_gram_lisi,
+                "As_per_gram_FeS2": as_per_gram_fes2,
+                "discharge_temperature": res.get("discharge_temperature"),
+                "discharge_type": res.get("discharge_type"),
+            })
+
+    return {
+        "status": "success",
+        "battery_code": battery_code,
+        "build_number": build_number,
+        "computation": "Server-side (Rules 4.3, 4.4, 4.6, 4.7)",
+        "active_material": {
+            "Anode_Active_Material_LiSi_g": lisi_g,
+            "Cathode_Active_Material_FeS2_g": fes2_g,
+        },
+        "design_parameters": active_mat.get("design_parameters_used", {}),
+        "table_5_data": table_rows,
+        "rulebook_references": {
+            "Rule 4.3": "Anode Active Material (LiSi) calculation",
+            "Rule 4.4": "Cathode Active Material (FeS2) calculation",
+            "Rule 4.6.1": "Standard per-cell cut-off voltages: 1.2, 1.3, 1.4, 1.5, 1.6 V",
+            "Rule 4.6.4": "Ampere-seconds capacity = SUM(Current × Time_Interval) to cut-off",
+            "Rule 4.7.1": "As/g LiSi = Ampere-seconds / Anode Active Material",
+            "Rule 4.7.2": "As/g FeS2 = Ampere-seconds / Cathode Active Material",
+        },
+    }

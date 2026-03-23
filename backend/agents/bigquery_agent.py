@@ -3,6 +3,8 @@
 from google.adk.agents import Agent
 
 from tools.bigquery_tools import (
+    calculate_active_material,
+    calculate_active_material_utilization,
     compare_builds,
     compute_capacity_at_voltage,
     get_battery_list,
@@ -67,7 +69,8 @@ and use run_aggregation_query(). You do NOT need a pre-built tool for every rule
 ## TOOL SELECTION GUIDE:
 - "Analyze battery X build Y" → analyze_build_complete()
 - "Calculate capacity at voltage X" → compute_capacity_at_voltage()
-- "Active material utilization" → get_design_parameters() + compute_capacity_at_voltage()
+- "Active material" / "LiSi" / "FeS2" → calculate_active_material() (Rules 4.3, 4.4)
+- "Active material utilization" → calculate_active_material() + compute_capacity_at_voltage()
 - Complex rule-based calculations → run_aggregation_query() with custom SQL
 - "Show me the discharge curve" → get_discharge_data() (chart data only)
 - "List batteries" → get_battery_list()
@@ -81,6 +84,8 @@ Include pass/fail status when available.""",
         # === Generic computation (handles ANY rulebook calculation) ===
         run_aggregation_query,
         compute_capacity_at_voltage,
+        calculate_active_material,
+        calculate_active_material_utilization,
         # === Specialized discharge analysis ===
         analyze_build_complete,
         calculate_discharge_duration,
