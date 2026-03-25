@@ -16,6 +16,7 @@ export default function App() {
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingConversationId, setLoadingConversationId] = useState(null);
   const [thinkingSteps, setThinkingSteps] = useState([]);
   const [mode, setMode] = useState('normal');
 
@@ -92,6 +93,7 @@ export default function App() {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
     setIsLoading(true);
+    setLoadingConversationId(activeConversationId);
     setThinkingSteps([]);
 
     try {
@@ -113,6 +115,7 @@ export default function App() {
       // If this was a new conversation, update the ID
       if (!activeConversationId && response.conversation_id) {
         setActiveConversationId(response.conversation_id);
+        setLoadingConversationId(response.conversation_id);
       }
 
       // Add assistant response
@@ -145,6 +148,7 @@ export default function App() {
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
+      setLoadingConversationId(null);
       setThinkingSteps([]);
     }
   }, [activeConversationId, mode]);
@@ -156,6 +160,10 @@ export default function App() {
 
   const handleSelectConversation = async (convId) => {
     setActiveConversationId(convId);
+    // Don't show thinking state from a different conversation
+    if (loadingConversationId !== convId) {
+      setThinkingSteps([]);
+    }
     await loadMessages(convId);
   };
 
@@ -292,8 +300,8 @@ export default function App() {
 
         <ChatArea
           messages={messages}
-          isLoading={isLoading}
-          thinkingSteps={thinkingSteps}
+          isLoading={isLoading && (loadingConversationId === activeConversationId || loadingConversationId === null)}
+          thinkingSteps={(isLoading && loadingConversationId !== activeConversationId && loadingConversationId !== null) ? [] : thinkingSteps}
           onSendMessage={handleSendMessage}
           mode={mode}
         />

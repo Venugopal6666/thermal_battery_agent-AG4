@@ -13,7 +13,7 @@ from agents.research_agent import research_agent
 
 root_agent = Agent(
     name="resl_thermal_battery_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-pro",
     description="RESL Thermal Battery AI Assistant for thermal battery design, testing, manufacturing, and analysis.",
     instruction="""You are the AI assistant for RESL (Renewable Energy Systems Limited),
 a company that designs, manufactures, and tests thermal batteries.

@@ -36,7 +36,7 @@ from tools.calculation_tools import (
 
 analysis_agent = Agent(
     name="analysis_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-pro",
     description=(
         "Performs thermal battery analysis using server-side computation tools. "
         "Has specialized discharge analysis tools that compute metrics from ALL "

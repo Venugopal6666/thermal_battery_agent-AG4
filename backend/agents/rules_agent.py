@@ -6,7 +6,7 @@ from tools.rulebook_tools import get_rules_by_category, search_rules
 
 rules_agent = Agent(
     name="rules_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-pro",
     description=(
         "Searches and retrieves relevant rules from the RESL rulebook. "
         "Use this agent to find applicable rules, validate responses against "

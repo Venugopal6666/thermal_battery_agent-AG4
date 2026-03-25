@@ -348,16 +348,17 @@ async def _run_agent_once(conversation_id: str, user_message: str, mode: str) ->
                 if is_thought and part.text:
                     thinking_content = (thinking_content or "") + part.text
                 
-                # Collect response text from ALL non-thought text parts
-                # (Gemini 2.5 Flash final answer comes as non-thought text)
-                if part.text and not is_thought:
+                # Collect ALL text into response_text
+                # With Gemini 2.5 Flash, the final answer may come as
+                # thought=True OR thought=False — we must capture both
+                if part.text:
                     text = part.text.strip()
                     is_code = _is_code_dump(text) if text else False
                     if is_code:
                         logger.warning(f"[FILTERED CODE DUMP] len={len(part.text)} preview={repr(part.text[:100])}")
                     elif text:
                         response_text += part.text
-                        logger.debug(f"[RESPONSE] len={len(part.text)} preview={repr(part.text[:80])}")
+                        logger.debug(f"[RESPONSE] thought={is_thought} len={len(part.text)} preview={repr(part.text[:80])}")
 
         # Track function calls for metadata and thinking steps
         if event.content and event.content.parts:
@@ -504,8 +505,10 @@ async def _run_agent_streaming(conversation_id: str, user_message: str, mode: st
                         if is_thought and part.text:
                             thinking_content = (thinking_content or "") + part.text
                         
-                        # Collect response text from ALL non-thought text parts
-                        if part.text and not is_thought:
+                        # Collect ALL text into response_text
+                        # With Gemini 2.5 Flash, the final answer may come as
+                        # thought=True OR thought=False — we must capture both
+                        if part.text:
                             text = part.text.strip()
                             is_code = _is_code_dump(text) if text else False
                             if is_code:

@@ -40,7 +40,7 @@ from tools.rulebook_tools import search_rules
 
 research_agent = Agent(
     name="deep_research_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-pro",
     description=(
         "Conducts deep research across multiple batteries and builds. "
         "Has ALL tools including specialized discharge analysis that computes "

@@ -29,7 +29,7 @@ from tools.discharge_analysis_tools import (
 
 bigquery_agent = Agent(
     name="bigquery_data_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-pro",
     description=(
         "Retrieves battery data from BigQuery and performs discharge analysis. "
         "Has specialized tools that compute discharge duration, activation time, "
