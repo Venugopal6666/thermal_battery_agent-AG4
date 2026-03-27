@@ -3,6 +3,7 @@
 from google.adk.agents import Agent
 
 from tools.bigquery_tools import (
+    analyze_thermal_stack_calorific_value,
     calculate_active_material,
     calculate_active_material_utilization,
     compare_builds,
@@ -86,6 +87,7 @@ Include pass/fail status when available.""",
         compute_capacity_at_voltage,
         calculate_active_material,
         calculate_active_material_utilization,
+        analyze_thermal_stack_calorific_value,
         # === Specialized discharge analysis ===
         analyze_build_complete,
         calculate_discharge_duration,

@@ -910,3 +910,138 @@ def calculate_active_material_utilization(
             "Rule 4.7.2": "As/g FeS2 = Ampere-seconds / Cathode Active Material",
         },
     }
+
+def analyze_thermal_stack_calorific_value(
+    battery_code: str,
+    build_number: str,
+) -> dict:
+    """Computes Thermal Stack Calorific Value and Component Weights 
+    according to Rulebook Rules 7.1, 8.0, and 9.0.
+
+    Args:
+        battery_code: The battery type code (e.g., "46")
+        build_number: The build number (e.g., "208")
+
+    Returns:
+        dict with verification results, weights breakdown, and final calorific values.
+    """
+    try:
+        client = _get_bq_client()
+
+        param_names = [
+            "Cells in Series", "Stacks in Parallel", "Total Numbers of Cells",
+            "Total Number of Cells", "Heat Pellet-1 Qty", "Heat Pellet-1B Qty",
+            "Heat Pellet-1 Weight", "Heat Pellet-1B Weight", "HP-1 CV/Pellet",
+            "Anode Weight per Electrode", "Cathode Weight per Electrode",
+            "Electrolyte Weight per Electrode", "Current Collector Weight"
+        ]
+        placeholders = ", ".join(f"'{p}'" for p in param_names)
+        sql = f"""
+            SELECT parameter_name, parameter_value
+            FROM {_full_table('design_parameters')}
+            WHERE battery_code = '{battery_code}'
+              AND build_number = '{build_number}'
+              AND parameter_name IN ({placeholders})
+        """
+        results = client.query(sql).result()
+        params = {}
+        for row in results:
+            if row.parameter_value:
+                # Store numeric floats / ints safely
+                try:
+                    params[row.parameter_name] = float(row.parameter_value)
+                except ValueError:
+                    params[row.parameter_name] = 0.0
+
+        # Helper to grab param with fallback
+        def get_p(key: str, fallback: float = 0.0) -> float:
+            return float(params.get(key, fallback))
+
+        def get_i(key: str, fallback: int = 0) -> int:
+            return int(params.get(key, fallback))
+
+        cells = get_i("Cells in Series")
+        stacks = get_i("Stacks in Parallel", 1)
+        
+        total_cells_db = get_i("Total Numbers of Cells", get_i("Total Number of Cells"))
+        
+        hp1_qty = get_i("Heat Pellet-1 Qty")
+        hp1b_qty = get_i("Heat Pellet-1B Qty")
+
+        # --- Rule 7.1 Validation ---
+        errors = []
+        if total_cells_db > 0 and total_cells_db != (cells * stacks):
+            errors.append(f"Rule 7.1.2 ERROR: Total Number of Cells ({total_cells_db}) does not match Number of Cells in Series ({cells}) multiplied by Number of Stacks in Parallel ({stacks}).")
+        
+        if total_cells_db > 0 and total_cells_db != (hp1_qty + hp1b_qty):
+            errors.append(f"Rule 7.1.3 ERROR: Total Number of Cells ({total_cells_db}) does not match the sum of Heat Pellet-1 Qty ({hp1_qty}) and Heat Pellet-1B Qty ({hp1b_qty}).")
+            
+        hp1_wt = get_p("Heat Pellet-1 Weight")
+        hp1b_wt = get_p("Heat Pellet-1B Weight")
+        hp1_cv = get_p("HP-1 CV/Pellet")
+        
+        # --- Rule 8.0: Calorific Value (Stack) ---
+        total_cv_hp1 = hp1_qty * hp1_wt * hp1_cv
+        total_cv_hp1b = hp1b_qty * hp1b_wt * hp1_cv
+        total_cv_stack = total_cv_hp1 + total_cv_hp1b
+
+        # --- Rule 9.0: Weight of Stack ---
+        anode_wt = get_p("Anode Weight per Electrode")
+        cathode_wt = get_p("Cathode Weight per Electrode")
+        electrolyte_wt = get_p("Electrolyte Weight per Electrode")
+        cc_wt = get_p("Current Collector Weight")
+        
+        cs_sp = cells * stacks
+
+        stack_wts = {
+            "1_Anode": round(cs_sp * anode_wt, 4),
+            "2_Cathode": round(cs_sp * cathode_wt, 4),
+            "3_Electrolyte": round(cs_sp * electrolyte_wt, 4),
+            "4_Heat_Pellet_1": round(cs_sp * hp1_wt, 4),
+            "5_Heat_Pellet_1B": round(cs_sp * hp1b_wt, 4),
+            "6_Current_Collector": round(cs_sp * cc_wt * 2.0, 4)
+        }
+        
+        total_stack_weight = sum(stack_wts.values())
+        
+        cv_per_gram = round(total_cv_stack / total_stack_weight, 4) if total_stack_weight > 0 else 0.0
+        
+        # Fetching max Ampere capacity by reusing the Table-5 calculation function
+        util_res = calculate_active_material_utilization(battery_code, build_number)
+        as_capacity = 1.0 # fallback
+        if util_res.get("status") == "success":
+            # get maximum ampere seconds capacity from the table rows
+            table_5_data = util_res.get("table_5_data", [])
+            for row in table_5_data:
+                as_capacity = max(as_capacity, row.get("ampere_seconds_capacity", 0.0))
+        
+        cv_per_gram_per_as = round(cv_per_gram / float(as_capacity), 6) if as_capacity else 0.0
+
+        return {
+            "status": "success",
+            "battery_code": battery_code,
+            "build_number": build_number,
+            "computation": "Server-side (Rules 7.1, 8.0, 9.0)",
+            "validation_errors": errors,
+            "validation_passed": len(errors) == 0,
+            "rule_8_calorific_value": {
+                "total_cv_hp1": round(total_cv_hp1, 4),
+                "total_cv_hp1b": round(total_cv_hp1b, 4),
+                "total_cv_stack": round(total_cv_stack, 4)
+            },
+            "rule_9_stack_weight": {
+                "total_stack_weight_g": round(total_stack_weight, 4),
+                "components": stack_wts,
+                "cv_per_gram_stack": cv_per_gram,
+                "cv_per_gram_per_As": cv_per_gram_per_as,
+                "ampere_seconds_capacity_used": round(float(as_capacity), 4)
+            },
+            "rulebook_references": {
+                "Rule 7.1": "Total Cells verification against Series/Parallel and Pellet Quantities",
+                "Rule 8.1": "Stack Calorific Value calculation",
+                "Rule 9.1-9.4": "Stack Component Weights",
+                "Rule 9.5-9.6": "CV per gram and CV per gram per Ampere Second"
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}
