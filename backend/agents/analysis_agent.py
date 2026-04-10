@@ -25,6 +25,16 @@ from tools.discharge_analysis_tools import (
     compare_builds_performance,
 )
 
+from tools.report_analysis_tools import (
+    generate_comprehensive_battery_report,
+    generate_qualified_builds_report,
+    calculate_performance_degradation_ratio,
+    calculate_temperature_degradation_ratio,
+    generate_anode_cathode_multibuild_summary,
+    get_composite_design_data,
+    calculate_material_utilization,
+)
+
 from tools.calculation_tools import (
     analyze_discharge_curve,
     analyze_temperature_profile,
@@ -100,6 +110,14 @@ Interpretation with exact numbers from tool responses.""",
         calculate_open_circuit_voltage,
         calculate_on_load_voltage,
         compare_builds_performance,
+        # Multi-build report analysis (Rules 3.1, 3.2, 12.0, Tables 1/2/6.1/6.2)
+        generate_comprehensive_battery_report,
+        generate_qualified_builds_report,
+        calculate_performance_degradation_ratio,
+        calculate_temperature_degradation_ratio,
+        generate_anode_cathode_multibuild_summary,
+        get_composite_design_data,
+        calculate_material_utilization,
         # Data retrieval
         get_discharge_data,
         get_temperature_data,

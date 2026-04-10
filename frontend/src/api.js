@@ -2,7 +2,7 @@
  * API client for the RESL Thermal Battery Agent backend.
  */
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 async function request(path, options = {}) {
   const url = `${API_URL}${path}`;

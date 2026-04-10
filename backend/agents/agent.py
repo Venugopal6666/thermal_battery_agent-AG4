@@ -60,6 +60,12 @@ NEVER describe your plan. NEVER say "I will" or "Step 1". Just delegate and pres
 4. **deep_research_agent** — Complex multi-step investigations with ALL tools
 
 ## DELEGATION STRATEGY:
+- "Comprehensive report" / "All tables" / "Qualified builds review" / "Full report"
+  / queries that ask for Tables 1 through 12 / "review data of battery code X"
+  → bigquery_data_agent. It MUST call exactly one tool —
+  generate_comprehensive_battery_report(battery_code) — and output the returned
+  `markdown_report` field VERBATIM. This is the single source of truth for the
+  standard 12-table report; never ask sub-agents to assemble it tool-by-tool.
 - "Analyze build X" / "Discharge duration" / "Activation time" → bigquery_data_agent
   (it has specialized tools that compute from ALL data points)
 - "Active material" / "LiSi weight" / "FeS2 weight" / "anode material" / "cathode material"

@@ -70,6 +70,14 @@ TOOL_DESCRIPTIONS = {
     "compute_capacity_at_voltage": "⚡ Computing Ampere-seconds capacity at cut-off voltage...",
     "calculate_active_material": "🧪 Computing active material (LiSi/FeS2) per Rules 4.3 & 4.4...",
     "calculate_active_material_utilization": "📊 Computing active material utilization (Table-5) per Rules 4.6 & 4.7...",
+    "calculate_material_utilization": "📊 Computing active material utilization (Table-5) per Rules 4.6 & 4.7...",
+    "generate_comprehensive_battery_report": "📑 Generating comprehensive 12-table battery report (server-side, all builds)...",
+    "generate_qualified_builds_report": "📋 Generating qualified-builds summary (Tables 1 & 2)...",
+    "calculate_performance_degradation_ratio": "📉 Computing Performance Degradation Ratio (Rule 3.1, Table 3)...",
+    "calculate_temperature_degradation_ratio": "🌡️ Computing Temperature Degradation Ratio (Rule 3.2, Table 4)...",
+    "generate_anode_cathode_multibuild_summary": "🧪 Building anode/cathode multi-build summary (Tables 6.1 & 6.2)...",
+    "get_composite_design_data": "🗂️ Fetching composite design data (Rule 12.0, Table 12.0)...",
+    "analyze_thermal_stack_calorific_value": "🔥 Computing thermal stack calorific value (Rules 7.1–9.7)...",
     "search_rules": "📖 Searching rulebook...",
     "get_rules_by_category": "📂 Fetching rules by category...",
     "transfer_to_agent": "🤖 Delegating to sub-agent...",
@@ -86,11 +94,28 @@ AGENT_DESCRIPTIONS = {
 
 
 def _is_code_dump(text: str) -> bool:
-    """Detect if text is a raw code dump (tool definitions leaked by the LLM).
-    Returns True if the text looks like Python function/class definitions rather
-    than a genuine response to the user."""
+    """Detect a raw Python tool-definition dump leaked by the LLM.
+
+    We only filter when the text looks UNAMBIGUOUSLY like raw Python source —
+    e.g. starts with 'def name(' or 'class Name' at the very top, or contains
+    multiple known tool-definition signatures back-to-back. We must NOT drop
+    legitimate markdown reports just because they happen to contain a `def ` or
+    `class ` token somewhere inside fenced code blocks.
+    """
     stripped = text.strip()
-    # Check for Python function/class definition patterns
+    if not stripped:
+        return False
+
+    # Hard rule: only suspect things that BEGIN like raw Python source.
+    first_line = stripped.split('\n', 1)[0].lstrip()
+    starts_like_python = (
+        first_line.startswith('def ') or first_line.startswith('class ')
+    ) and first_line.rstrip().endswith((':', '('))
+    if not starts_like_python:
+        return False
+
+    # Even then, require at least two known leaked-tool signatures so we don't
+    # nuke a legitimate "def foo():" code snippet the user explicitly asked for.
     code_indicators = [
         'def transfer_to_agent(',
         'def run_aggregation_query(',
@@ -102,6 +127,7 @@ def _is_code_dump(text: str) -> bool:
         'def calculate_open_circuit_voltage(',
         'def calculate_on_load_voltage(',
         'def compare_builds_performance(',
+        'def generate_comprehensive_battery_report(',
         'def get_battery_list(',
         'def get_builds_for_battery(',
         'def get_customer_specs(',
@@ -111,17 +137,8 @@ def _is_code_dump(text: str) -> bool:
         'def compare_builds(',
         'def get_discharge_summary(',
     ]
-    # If the text contains multiple function definitions, it's a code dump
-    matches = sum(1 for indicator in code_indicators if indicator in stripped)
-    if matches >= 2:
-        return True
-    # If it starts with 'def ' or 'class ' and looks like raw code
-    lines = stripped.split('\n')
-    if len(lines) > 3:
-        def_count = sum(1 for line in lines if line.strip().startswith('def ') or line.strip().startswith('class '))
-        if def_count >= 2:
-            return True
-    return False
+    matches = sum(1 for ind in code_indicators if ind in stripped)
+    return matches >= 2
 
 
 # ── Schemas ─────────────────────────────────────────────────
@@ -187,6 +204,7 @@ def _load_all_rules() -> tuple[list[dict], str]:
     Instead of similarity search (which misses rules), we load every active rule
     and let the LLM decide which ones are relevant to the user's query.
     gemini-2.5-flash has a 1M token context window, so this is safe.
+
 
     Returns:
         (all_rules, context_block)

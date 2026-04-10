@@ -28,6 +28,16 @@ from tools.discharge_analysis_tools import (
     compare_builds_performance,
 )
 
+from tools.report_analysis_tools import (
+    generate_comprehensive_battery_report,
+    generate_qualified_builds_report,
+    calculate_performance_degradation_ratio,
+    calculate_temperature_degradation_ratio,
+    generate_anode_cathode_multibuild_summary,
+    get_composite_design_data,
+    calculate_material_utilization,
+)
+
 from tools.calculation_tools import (
     analyze_discharge_curve,
     analyze_temperature_profile,
@@ -56,7 +66,14 @@ research_agent = Agent(
    all metrics server-side from ALL data points using rulebook procedures.
 4. Fetch data ONE build at a time.
 
-## PRIMARY ANALYSIS TOOLS:
+## COMPREHENSIVE REPORT — USE THIS FIRST WHEN APPLICABLE:
+For any "give me the full report / all 12 tables / comprehensive analysis /
+qualified builds review" type request for a single battery code, call EXACTLY
+ONE tool: generate_comprehensive_battery_report(battery_code).
+It returns ALL 12 tables in one call AND a `markdown_report` field — output
+that markdown_report VERBATIM to the user. Do not orchestrate per-table tools.
+
+## PRIMARY ANALYSIS TOOLS (single build / single table):
 - analyze_build_complete(battery_code, build_number) — COMPLETE analysis per rulebook
 - compare_builds_performance(battery_code, build_numbers) — Multi-build comparison
 - calculate_discharge_duration / calculate_activation_time — Individual metrics
@@ -96,6 +113,14 @@ Actionable next steps.""",
         calculate_active_material,
         calculate_active_material_utilization,
         analyze_thermal_stack_calorific_value,
+        # Comprehensive multi-table report (PRIMARY for full reports)
+        generate_comprehensive_battery_report,
+        generate_qualified_builds_report,
+        calculate_performance_degradation_ratio,
+        calculate_temperature_degradation_ratio,
+        generate_anode_cathode_multibuild_summary,
+        get_composite_design_data,
+        calculate_material_utilization,
         # Specialized discharge analysis (PRIMARY)
         analyze_build_complete,
         compare_builds_performance,

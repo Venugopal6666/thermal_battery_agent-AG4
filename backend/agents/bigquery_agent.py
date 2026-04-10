@@ -28,6 +28,16 @@ from tools.discharge_analysis_tools import (
     compare_builds_performance,
 )
 
+from tools.report_analysis_tools import (
+    generate_comprehensive_battery_report,
+    generate_qualified_builds_report,
+    calculate_performance_degradation_ratio,
+    calculate_temperature_degradation_ratio,
+    generate_anode_cathode_multibuild_summary,
+    get_composite_design_data,
+    calculate_material_utilization,
+)
+
 bigquery_agent = Agent(
     name="bigquery_data_agent",
     model="gemini-2.5-pro",
@@ -67,6 +77,28 @@ and use run_aggregation_query(). You do NOT need a pre-built tool for every rule
 - calculate_on_load_voltage() — Rule 2.7
 - compare_builds_performance() — Multi-build comparison
 
+## COMPREHENSIVE REPORT — USE THIS FIRST:
+When the user asks for the standard multi-table battery report (Tables 1 through
+12.0, "qualified builds", "all tables", "comprehensive analysis", "full report"),
+call EXACTLY ONE tool:
+    generate_comprehensive_battery_report(battery_code)
+It returns ALL 12 tables in a single call AND a fully pre-rendered
+`markdown_report` field. Output that markdown_report VERBATIM to the user.
+Do NOT call the per-table tools below first — they are only needed when the user
+asks for one specific table or wants something not in the standard report.
+
+## MULTI-BUILD REPORT TOOLS (for the comprehensive battery report):
+- generate_comprehensive_battery_report(battery_code) — ALL 12 tables in one call (PREFERRED)
+- generate_qualified_builds_report(battery_code) — Tables 1 & 2
+  (per-build summary filtered to builds meeting Min Discharge Duration,
+   plus aggregated-by-condition summary with min/max/median)
+- calculate_performance_degradation_ratio(battery_code) — Rule 3.1 → Table 3
+- calculate_temperature_degradation_ratio(battery_code) — Rule 3.2 → Table 4
+- generate_anode_cathode_multibuild_summary(battery_code) — Tables 6.1 & 6.2
+- get_composite_design_data(battery_code) — Rule 12.0 → Table 12.0
+- analyze_thermal_stack_calorific_value(battery_code, build_number) — Rules 7.1–9.7 → Table 9
+- calculate_material_utilization() — alias for calculate_active_material_utilization
+
 ## TOOL SELECTION GUIDE:
 - "Analyze battery X build Y" → analyze_build_complete()
 - "Calculate capacity at voltage X" → compute_capacity_at_voltage()
@@ -95,6 +127,14 @@ Include pass/fail status when available.""",
         calculate_open_circuit_voltage,
         calculate_on_load_voltage,
         compare_builds_performance,
+        # === Multi-build report analysis (Rules 3.1, 3.2, 12.0) ===
+        generate_comprehensive_battery_report,
+        generate_qualified_builds_report,
+        calculate_performance_degradation_ratio,
+        calculate_temperature_degradation_ratio,
+        generate_anode_cathode_multibuild_summary,
+        get_composite_design_data,
+        calculate_material_utilization,
         # === General data retrieval ===
         query_bigquery,
         get_battery_list,
