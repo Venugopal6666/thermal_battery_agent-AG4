@@ -500,6 +500,96 @@ def _md_table(headers: list[str], rows: list[list]) -> str:
     return "\n".join([head, sep, *body]) + "\n"
 
 
+def _pivot_for_chart(
+    rows: list[dict],
+    x_field: str,
+    series_field: str,
+    value_field: str,
+) -> tuple[list[str], list[list]]:
+    """Pivot a list of long-form rows into a wide table for the chart renderer.
+
+    Given rows like
+        [{x: 'A', series: 'static', value: 1.0},
+         {x: 'A', series: 'RV',     value: 0.9},
+         {x: 'B', series: 'static', value: 1.1}]
+
+    return headers + body suitable for the frontend's chart block format:
+        headers = ['x_field', 'static', 'RV']
+        body    = [['A', 1.0, 0.9],
+                   ['B', 1.1, '']]
+    """
+    x_values: list = []
+    seen_x: set = set()
+    series_values: list = []
+    seen_series: set = set()
+    for r in rows:
+        x = r.get(x_field)
+        s = r.get(series_field)
+        if x is None or s is None:
+            continue
+        x_key = str(x)
+        s_key = str(s)
+        if x_key not in seen_x:
+            seen_x.add(x_key)
+            x_values.append(x_key)
+        if s_key not in seen_series:
+            seen_series.add(s_key)
+            series_values.append(s_key)
+
+    grid: dict[tuple[str, str], object] = {}
+    for r in rows:
+        x = r.get(x_field)
+        s = r.get(series_field)
+        v = r.get(value_field)
+        if x is None or s is None or v is None:
+            continue
+        grid[(str(x), str(s))] = v
+
+    headers = [x_field] + series_values
+    body = [
+        [x] + [grid.get((x, s), "") for s in series_values]
+        for x in x_values
+    ]
+    return headers, body
+
+
+def _chart_block(
+    chart_type: str,
+    title: str,
+    headers: list[str],
+    body: list[list],
+) -> str:
+    """Render a fenced ```chart block in the format expected by MessageBubble.jsx.
+
+    The frontend parser requires:
+        type: line|bar|area|scatter
+        title: ...
+        xKey: <first column>
+        yKeys: <comma-separated remaining columns>
+        data:
+        col1 | col2 | col3
+        v1   | v2   | v3
+    Without the `data:` section the renderer returns null and shows the raw code.
+    """
+    if not body or len(headers) < 2:
+        return ""
+    x_key = headers[0]
+    y_keys = headers[1:]
+    lines = [
+        "```chart",
+        f"type: {chart_type}",
+        f"title: {title}",
+        f"xKey: {x_key}",
+        f"yKeys: {', '.join(y_keys)}",
+        "data:",
+        " | ".join(headers),
+    ]
+    for row in body:
+        lines.append(" | ".join("" if c is None or c == "" else str(c) for c in row))
+    lines.append("```")
+    return "\n".join(lines) + "\n"
+
+
 def generate_comprehensive_battery_report(battery_code: str) -> dict:
     """Build the FULL multi-table comprehensive report for a battery code in ONE call.
 
@@ -745,7 +835,7 @@ def generate_comprehensive_battery_report(battery_code: str) -> dict:
             [[k.split("_", 1)[-1].replace("_", " "), v] for k, v in components.items()],
         ))
 
-    md.append("## Table 10 — Discharge Duration Trend Across Qualified Builds (Rule 10, chart-ready)")
+    md.append("## Table 10 — Discharge Duration Trend Across Qualified Builds (Rule 10)")
     md.append(_md_table(
         ["Build", "Temp (°C)", "Type", "Duration (s)", "Target (s)"],
         [[
@@ -753,11 +843,71 @@ def generate_comprehensive_battery_report(battery_code: str) -> dict:
             r.get("discharge_duration_s"), r.get("target_duration_s"),
         ] for r in table_10],
     ))
-    md.append("```chart\ntype: line\ntitle: Discharge Duration vs Build (qualified)\nx: build_number\ny: discharge_duration_s\nseries: discharge_type\n```\n")
+    # Chart 10a: per-build discharge duration grouped by discharge_type
+    headers10a, body10a = _pivot_for_chart(
+        [{"build_number": r["build_number"], "discharge_type": r["discharge_type"],
+          "duration_s": r["discharge_duration_s"]} for r in table_10],
+        x_field="build_number",
+        series_field="discharge_type",
+        value_field="duration_s",
+    )
+    md.append(_chart_block(
+        "line",
+        "Discharge Duration (s) vs Build — by Discharge Type",
+        headers10a, body10a,
+    ))
+    # Chart 10b: per-build discharge duration grouped by temperature
+    headers10b, body10b = _pivot_for_chart(
+        [{"build_number": r["build_number"], "discharge_temperature": r["discharge_temperature"],
+          "duration_s": r["discharge_duration_s"]} for r in table_10],
+        x_field="build_number",
+        series_field="discharge_temperature",
+        value_field="duration_s",
+    )
+    md.append(_chart_block(
+        "bar",
+        "Discharge Duration (s) vs Build — by Temperature",
+        headers10b, body10b,
+    ))
 
-    md.append("## Table 11 — Degradation Ratio Summary (Rule 11, chart-ready)")
-    md.append("```chart\ntype: bar\ntitle: Performance Degradation Ratio by Temperature × Type\nx: discharge_temperature\ny: degradation_ratio\nseries: discharge_type\n```\n")
-    md.append("```chart\ntype: bar\ntitle: Temperature Degradation Ratio by Type × Temperature\nx: discharge_type\ny: degradation_ratio\nseries: discharge_temperature\n```\n")
+    md.append("## Table 11 — Degradation Ratio Summary (Rule 11)")
+    # Chart 11a: PDR by (temperature × discharge_type)
+    headers11a, body11a = _pivot_for_chart(
+        table_3,
+        x_field="discharge_temperature",
+        series_field="discharge_type",
+        value_field="degradation_ratio",
+    )
+    md.append(_chart_block(
+        "bar",
+        "Performance Degradation Ratio (Rule 3.1) — by Temperature × Type",
+        headers11a, body11a,
+    ))
+    # Chart 11b: TDR by (discharge_type × temperature)
+    headers11b, body11b = _pivot_for_chart(
+        table_4,
+        x_field="discharge_type",
+        series_field="discharge_temperature",
+        value_field="degradation_ratio",
+    )
+    md.append(_chart_block(
+        "bar",
+        "Temperature Degradation Ratio (Rule 3.2) — by Type × Temperature",
+        headers11b, body11b,
+    ))
+
+    # Bonus: chart of CV per gram per build (Table 7)
+    if any(r.get("cv_per_gram_stack") is not None for r in table_7):
+        cv_headers = ["build_number", "cv_per_gram_stack"]
+        cv_body = [
+            [r["build_number"], r.get("cv_per_gram_stack") or 0]
+            for r in table_7
+        ]
+        md.append(_chart_block(
+            "bar",
+            "Calorific Value per Gram of Stack (cal/g) — by Build",
+            cv_headers, cv_body,
+        ))
 
     md.append("## Table 12.0 — Composite Design Data (Rule 12.0)")
     if table_12_0:
