@@ -17,21 +17,84 @@ const CHART_COLORS = [
 
 /**
  * Parse a ```chart code block into chart config.
- * Supports formats:
- *   ```chart
- *   type: line|bar|area|scatter
- *   title: Chart Title
- *   xKey: time_seconds
- *   yKeys: voltage_volts, current_amps
- *   data:
- *   time_seconds | voltage_volts | current_amps
- *   0            | 2.5           | 1.2
- *   10           | 2.4           | 1.3
- *   ```
+ *
+ * Supports TWO formats — try JSON first (preferred), fall back to the legacy
+ * pipe-delimited key:value format.
+ *
+ * 1) JSON format (preferred — what the backend now emits):
+ *    ```chart
+ *    {
+ *      "type": "bar",
+ *      "title": "Performance Degradation Ratio",
+ *      "xKey": "discharge_temperature",
+ *      "yKeys": ["RV", "acceleration"],
+ *      "data": [
+ *        {"discharge_temperature": "+55", "RV": 0.943, "acceleration": 0.791},
+ *        {"discharge_temperature": "-10", "RV": 0.859, "acceleration": 1.005}
+ *      ]
+ *    }
+ *    ```
+ *
+ * 2) Legacy pipe format:
+ *    ```chart
+ *    type: line
+ *    title: ...
+ *    xKey: time_seconds
+ *    yKeys: voltage_volts, current_amps
+ *    data:
+ *    time_seconds | voltage_volts | current_amps
+ *    0            | 2.5           | 1.2
+ *    ```
  */
 function parseChartBlock(code) {
+  const stripped = code.trim();
+  if (!stripped) return null;
+
+  // ── Try JSON first ──
+  if (stripped.startsWith('{')) {
+    try {
+      const obj = JSON.parse(stripped);
+      // Coerce shape so the renderer never crashes on bad input
+      const config = {
+        type: String(obj.type || 'line').toLowerCase(),
+        title: String(obj.title || ''),
+        xKey: String(obj.xKey || obj.x || ''),
+        yKeys: Array.isArray(obj.yKeys)
+          ? obj.yKeys.map(String)
+          : (typeof obj.yKeys === 'string'
+              ? obj.yKeys.split(',').map((s) => s.trim())
+              : []),
+        data: Array.isArray(obj.data) ? obj.data : [],
+      };
+      // Auto-detect xKey/yKeys from the first data row if missing
+      if (config.data.length > 0) {
+        const firstKeys = Object.keys(config.data[0]);
+        if (!config.xKey && firstKeys.length > 0) config.xKey = firstKeys[0];
+        if (config.yKeys.length === 0 && firstKeys.length > 1) {
+          config.yKeys = firstKeys.filter((k) => k !== config.xKey);
+        }
+      }
+      // Coerce numeric strings to numbers so Recharts plots them
+      config.data = config.data.map((row) => {
+        const out = { ...row };
+        for (const k of config.yKeys) {
+          const v = out[k];
+          if (typeof v === 'string') {
+            const n = parseFloat(v);
+            if (!isNaN(n)) out[k] = n;
+          }
+        }
+        return out;
+      });
+      return config.data.length > 0 ? config : null;
+    } catch {
+      // Fall through to pipe parser
+    }
+  }
+
+  // ── Legacy pipe-delimited parser ──
   try {
-    const lines = code.trim().split('\n');
+    const lines = stripped.split('\n');
     const config = { type: 'line', title: '', xKey: '', yKeys: [], data: [] };
     let inData = false;
     let headers = [];
@@ -53,12 +116,10 @@ function parseChartBlock(code) {
           inData = true;
         }
       } else {
-        // Parse table-like data rows
         const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean);
         if (headers.length === 0) {
           headers = cells;
         } else if (!trimmed.match(/^[-|]+$/)) {
-          // Skip separator lines like --- | --- | ---
           const row = {};
           cells.forEach((cell, i) => {
             const key = headers[i] || `col${i}`;
@@ -70,7 +131,6 @@ function parseChartBlock(code) {
       }
     }
 
-    // Auto-detect xKey and yKeys if not set
     if (headers.length > 0) {
       if (!config.xKey) config.xKey = headers[0];
       if (config.yKeys.length === 0) config.yKeys = headers.slice(1);

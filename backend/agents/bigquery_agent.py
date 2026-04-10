@@ -83,9 +83,18 @@ When the user asks for the standard multi-table battery report (Tables 1 through
 call EXACTLY ONE tool:
     generate_comprehensive_battery_report(battery_code)
 It returns ALL 12 tables in a single call AND a fully pre-rendered
-`markdown_report` field. Output that markdown_report VERBATIM to the user.
-Do NOT call the per-table tools below first — they are only needed when the user
-asks for one specific table or wants something not in the standard report.
+`markdown_report` field.
+
+CRITICAL OUTPUT RULES for this tool:
+1. Output the `markdown_report` field VERBATIM. Copy it byte-for-byte.
+2. Do NOT add commentary before or after it.
+3. Do NOT reformat, rewrite, or "prettify" the ```chart fenced blocks.
+   They contain JSON that the frontend parses directly. If you change the
+   format (e.g. wrap them in different code fences, convert pipes to JSON,
+   convert JSON to YAML, add quotes, remove quotes, indent differently),
+   the frontend cannot render the charts and the user sees raw text.
+4. Do NOT call any other tool first — generate_comprehensive_battery_report
+   already runs all required sub-tools server-side.
 
 ## MULTI-BUILD REPORT TOOLS (for the comprehensive battery report):
 - generate_comprehensive_battery_report(battery_code) — ALL 12 tables in one call (PREFERRED)

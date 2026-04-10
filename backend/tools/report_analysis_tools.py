@@ -559,35 +559,48 @@ def _chart_block(
     headers: list[str],
     body: list[list],
 ) -> str:
-    """Render a fenced ```chart block in the format expected by MessageBubble.jsx.
+    """Render a fenced ```chart block as JSON for the frontend renderer.
 
-    The frontend parser requires:
-        type: line|bar|area|scatter
-        title: ...
-        xKey: <first column>
-        yKeys: <comma-separated remaining columns>
-        data:
-        col1 | col2 | col3
-        v1   | v2   | v3
-    Without the `data:` section the renderer returns null and shows the raw code.
+    The frontend's parseChartBlock (MessageBubble.jsx) accepts a JSON object of
+    the form:
+
+        {
+          "type": "bar",
+          "title": "...",
+          "xKey": "<first column>",
+          "yKeys": ["<remaining columns>"],
+          "data": [{"<xKey>": "...", "<series>": <number>}, ...]
+        }
+
+    JSON is preferred over the legacy pipe format because (a) it round-trips
+    cleanly through any LLM that might re-serialize the response, (b) it
+    handles missing values without ambiguity, and (c) Recharts consumes the
+    object structure directly.
     """
+    import json as _json
+
     if not body or len(headers) < 2:
         return ""
     x_key = headers[0]
     y_keys = headers[1:]
-    lines = [
-        "```chart",
-        f"type: {chart_type}",
-        f"title: {title}",
-        f"xKey: {x_key}",
-        f"yKeys: {', '.join(y_keys)}",
-        "data:",
-        " | ".join(headers),
-    ]
+
+    data_rows: list[dict] = []
     for row in body:
-        lines.append(" | ".join("" if c is None or c == "" else str(c) for c in row))
-    lines.append("```")
-    return "\n".join(lines) + "\n"
+        d: dict = {x_key: row[0]}
+        for i, key in enumerate(y_keys, start=1):
+            v = row[i] if i < len(row) else None
+            # Empty strings → None so the chart shows a gap rather than NaN
+            d[key] = None if (v is None or v == "") else v
+        data_rows.append(d)
+
+    payload = {
+        "type": chart_type,
+        "title": title,
+        "xKey": x_key,
+        "yKeys": y_keys,
+        "data": data_rows,
+    }
+    return "```chart\n" + _json.dumps(payload, indent=2, default=str) + "\n```\n"
 
 
 def generate_comprehensive_battery_report(battery_code: str) -> dict:
